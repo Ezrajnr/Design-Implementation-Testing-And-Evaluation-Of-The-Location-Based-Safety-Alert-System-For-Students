@@ -1,0 +1,8 @@
+streamlit
+folium
+streamlit-folium
+geopy
+shapely
+twilio
+pandas
+streamlit-js-eval
