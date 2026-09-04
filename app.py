@@ -11,7 +11,7 @@ from twilio.rest import Client
 # Page Configuration for Mobile View
 st.set_page_config(page_title="Location-Based Safety Alert System", page_icon="🛡️", layout="centered")
 
-# Custom CSS Banners
+# Custom CSS Banners and Layout Enhancements
 st.markdown("""
     <style>
     .safe-banner {
@@ -82,10 +82,20 @@ def send_real_sms(to_number, message_body):
         return False, str(e)
 
 # ==============================================================================
+# SINGLE-LINE TITLE HEADER (No Text Wrapping)
+# ==============================================================================
+st.markdown(
+    """
+    <h1 style="white-space: nowrap; font-size: calc(1.1rem + 1.1vw); margin-bottom: 10px; text-align: center;">
+        🛡️ Location-Based Safety Alert System for Students
+    </h1>
+    """, 
+    unsafe_allow_html=True
+)
+
+# ==============================================================================
 # USE CASE 1: USER REGISTRATION AND LOGIN
 # ==============================================================================
-st.title("🛡️ Location-Based Safety Alert System")
-
 if not st.session_state.logged_in:
     tab_login, tab_register = st.tabs(["🔑 Login", "📝 Register User Account"])
     
