@@ -3,15 +3,15 @@ import folium
 from streamlit_folium import st_folium
 from geopy.distance import geodesic
 from shapely.geometry import Point, Polygon
-import json
 import datetime
 import pandas as pd
 from streamlit_js_eval import get_geolocation
+from twilio.rest import Client
 
 # Page Configuration for Mobile View
-st.set_page_config(page_title="Student Safety System", page_icon="🛡️", layout="centered")
+st.set_page_config(page_title="Location-Based Safety Alert System", page_icon="🛡️", layout="centered")
 
-# Custom CSS for status banners
+# Custom CSS Banners
 st.markdown("""
     <style>
     .safe-banner {
@@ -33,14 +33,29 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Title & Header
-st.title("🛡️ LOCATION-BASED SAFETY ALERT SYSTEM FOR STUDENTS")
-st.caption("Location-Based Emergency System for Students")
+# ------------------------------------------------------------------------------
+# IN-MEMORY DATABASE INITIALIZATION (Simulated User & Alert Storage)
+# ------------------------------------------------------------------------------
+if 'users_db' not in st.session_state:
+    st.session_state.users_db = {
+        "TSU/FSC/CS/22/1040": {
+            "password": "password123",
+            "name": "John Doe",
+            "contact": "+2348065239843",
+            "authority_contact": "+234800911911"
+        }
+    }
 
-# ------------------------------------------------------------------------------
-# MOCK DATABASE / SETUP
-# ------------------------------------------------------------------------------
-# High-Risk Geofence Zone (e.g., Unlit Off-Campus Area)
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+
+if 'current_user' not in st.session_state:
+    st.session_state.current_user = None
+
+if 'alert_history' not in st.session_state:
+    st.session_state.alert_history = []
+
+# High-Risk Geofence Polygon Setup
 HIGH_RISK_ZONE = [
     (6.5244, 3.3792),
     (6.5260, 3.3792),
@@ -49,104 +64,198 @@ HIGH_RISK_ZONE = [
 ]
 risk_polygon = Polygon(HIGH_RISK_ZONE)
 
-if 'alert_history' not in st.session_state:
-    st.session_state.alert_history = []
+# Helper Function: Twilio Live SMS Dispatch
+def send_real_sms(to_number, message_body):
+    try:
+        account_sid = st.secrets["twilio"]["account_sid"]
+        auth_token = st.secrets["twilio"]["auth_token"]
+        from_number = st.secrets["twilio"]["twilio_number"]
 
-# ------------------------------------------------------------------------------
-# OBJECTIVE 1: USER-FRIENDLY INTERFACE & CONTROLS
-# ------------------------------------------------------------------------------
-st.sidebar.header("⚙️ Emergency Setup")
-student_id = st.sidebar.text_input("Student ID", value="TSU/FSC/CS/22/1040")
-primary_contact = st.sidebar.text_input("Primary Contact (SMS)", value="+2348065239843")
+        client = Client(account_sid, auth_token)
+        message = client.messages.create(
+            body=message_body,
+            from_=from_number,
+            to=to_number
+        )
+        return True, message.sid
+    except Exception as e:
+        return False, str(e)
 
-# ------------------------------------------------------------------------------
-# OBJECTIVE 2: REAL-TIME DEVICE GPS AUTO-DETECTION
-# ------------------------------------------------------------------------------
-st.subheader("📍 Live Device GPS Location")
+# ==============================================================================
+# USE CASE 1: USER REGISTRATION AND LOGIN
+# ==============================================================================
+st.title("🛡️ Location-Based Safety Alert System")
 
-# HTML5 Browser Geolocation Fetch
-loc = get_geolocation()
-
-if loc and 'coords' in loc:
-    user_lat = loc['coords']['latitude']
-    user_lon = loc['coords']['longitude']
-    accuracy = loc['coords']['accuracy']
+if not st.session_state.logged_in:
+    tab_login, tab_register = st.tabs(["🔑 Login", "📝 Register User Account"])
     
-    st.success(f"GPS Signal Acquired (Accuracy: ±{accuracy:.1f}m)")
-    st.info(f"**Latitude:** {user_lat:.6f} | **Longitude:** {user_lon:.6f}")
+    with tab_login:
+        st.subheader("User Login")
+        login_id = st.text_input("Student ID / Username", key="login_id")
+        login_pass = st.text_input("Password", type="password", key="login_pass")
+        
+        if st.button("Log In", type="primary"):
+            if login_id in st.session_state.users_db and st.session_state.users_db[login_id]["password"] == login_pass:
+                st.session_state.logged_in = True
+                st.session_state.current_user = login_id
+                st.success("Login successful!")
+                st.rerun()
+            else:
+                st.error("Invalid Student ID or Password.")
+
+    with tab_register:
+        st.subheader("New User Registration")
+        new_id = st.text_input("Student ID (e.g., TSU/FSC/CS/22/1040)", key="reg_id")
+        new_pass = st.text_input("Password", type="password", key="reg_pass")
+        new_name = st.text_input("Full Name", key="reg_name")
+        new_contact = st.text_input("Family/Friend Contact (E.164 format: +234...)", key="reg_contact")
+        authority_contact = st.text_input("Authority Security Hot-Line", value="+234800911911", key="reg_auth")
+        
+        if st.button("Register Account"):
+            if new_id and new_pass and new_contact:
+                st.session_state.users_db[new_id] = {
+                    "password": new_pass,
+                    "name": new_name,
+                    "contact": new_contact,
+                    "authority_contact": authority_contact
+                }
+                st.success("Account created successfully! Please log in.")
+            else:
+                st.warning("Please fill in all required registration fields.")
+
 else:
-    st.warning("⚠️ Please allow browser location access. Using default campus coordinates.")
-    # Fallback coordinates inside high-risk test boundary for evaluation
-    user_lat = 6.5250
-    user_lon = 3.3800
-
-# Spatial Geofence Verification
-current_point = Point(user_lat, user_lon)
-is_in_danger_zone = risk_polygon.contains(current_point)
-
-if is_in_danger_zone:
-    st.markdown('<div class="danger-banner">⚠️ <b>WARNING:</b> You have entered a designated High-Risk Zone!</div>', unsafe_allow_html=True)
-else:
-    st.markdown('<div class="safe-banner">✅ You are currently in a designated Safe Zone.</div>', unsafe_allow_html=True)
-
-# ------------------------------------------------------------------------------
-# INTERACTIVE MAP RENDERING
-# ------------------------------------------------------------------------------
-m = folium.Map(location=[user_lat, user_lon], zoom_start=16)
-
-# Active User Marker
-folium.Marker(
-    [user_lat, user_lon],
-    popup="Your Location",
-    icon=folium.Icon(color="red" if is_in_danger_zone else "blue", icon="user", prefix="fa")
-).add_to(m)
-
-# Highlight Danger Zone Polygon
-folium.Polygon(
-    locations=HIGH_RISK_ZONE,
-    color="red",
-    fill=True,
-    fill_color="red",
-    fill_opacity=0.3,
-    popup="High-Risk Area"
-).add_to(m)
-
-st_folium(m, width=700, height=300)
-
-# ------------------------------------------------------------------------------
-# OBJECTIVE 3: MULTI-CHANNEL ALERT MECHANISMS
-# ------------------------------------------------------------------------------
-st.subheader("🚨 Emergency Response")
-
-if st.button("TRIGGER SOS DISTRESS ALERT", type="primary"):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    alert_payload = {
-        "student_id": student_id,
-        "timestamp": timestamp,
-        "location": {"lat": user_lat, "lon": user_lon},
-        "danger_zone_active": is_in_danger_zone,
-        "recipient": primary_contact
-    }
+    # Authenticated User Dashboard
+    user_info = st.session_state.users_db[st.session_state.current_user]
     
-    st.session_state.alert_history.append(alert_payload)
-    
-    # 1. SMS Alert Transmission Summary
-    st.success(f"📱 **SMS Distress Alert sent to {primary_contact}**")
-    st.code(f"EMERGENCY! Student {student_id} needs help at coordinates ({user_lat:.6f}, {user_lon:.6f}). Map: https://maps.google.com/?q={user_lat},{user_lon}")
-    
-    # 2. Campus Security Notification
-    st.warning("📡 **Live Dispatch Sent to Campus Security Dashboard.**")
-    
-    # 3. Local Audio Alarm Trigger
-    st.markdown("""
-        <audio autoplay>
-          <source src="https://www.soundjay.com/buttons/beep-01a.mp3" type="audio/mpeg">
-        </audio>
-    """, unsafe_allow_html=True)
+    st.sidebar.markdown(f"### 👤 Logged in as: **{st.session_state.current_user}**")
+    st.sidebar.caption(f"Name: {user_info['name']}")
+    if st.sidebar.button("Logout"):
+        st.session_state.logged_in = False
+        st.session_state.current_user = None
+        st.rerun()
 
-# ------------------------------------------------------------------------------
-# EVALUATION & LOGGING DATA
-# ------------------------------------------------------------------------------
-if st.session_state.alert_history:
-    with st.expander("📊 View Sent Emergency Logs (Evaluation Data)"):
-        st.dataframe(pd.DataFrame(st.session_state.alert_history))
+    # App Navigation Menu according to Use Cases
+    nav_option = st.sidebar.radio(
+        "System Navigation",
+        ["📍 Location Tracking & Safety Map", "🚨 Activate Emergency Alert", "📜 View Alert History"]
+    )
+
+    # ==========================================================================
+    # USE CASE 2: LOCATION TRACKING
+    # ==========================================================================
+    if nav_option == "📍 Location Tracking & Safety Map":
+        st.subheader("2. Real-time Location Tracking")
+        
+        # Capture live browser/mobile GPS
+        loc = get_geolocation()
+
+        if loc and 'coords' in loc:
+            user_lat = loc['coords']['latitude']
+            user_lon = loc['coords']['longitude']
+            accuracy = loc['coords']['accuracy']
+            st.success(f"GPS Signal Active (Accuracy: ±{accuracy:.1f}m)")
+            st.info(f"**Latitude:** {user_lat:.6f} | **Longitude:** {user_lon:.6f}")
+        else:
+            st.warning("⚠️ Requesting device GPS... Using default campus coordinates.")
+            user_lat = 9.056700
+            user_lon = 7.496900
+
+        # Save active position to session
+        st.session_state['user_lat'] = user_lat
+        st.session_state['user_lon'] = user_lon
+
+        # Spatial Boundary Assessment
+        current_point = Point(user_lat, user_lon)
+        is_in_danger_zone = risk_polygon.contains(current_point)
+
+        if is_in_danger_zone:
+            st.markdown('<div class="danger-banner">⚠️ <b>WARNING:</b> You are in a designated High-Risk Zone!</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="safe-banner">✅ You are currently in a designated Safe Zone.</div>', unsafe_allow_html=True)
+
+        # Map Display
+        m = folium.Map(location=[user_lat, user_lon], zoom_start=16)
+        folium.Marker(
+            [user_lat, user_lon],
+            popup=f"User: {st.session_state.current_user}",
+            icon=folium.Icon(color="red" if is_in_danger_zone else "blue", icon="user", prefix="fa")
+        ).add_to(m)
+
+        folium.Polygon(
+            locations=HIGH_RISK_ZONE,
+            color="red",
+            fill=True,
+            fill_color="red",
+            fill_opacity=0.3,
+            popup="High-Risk Zone"
+        ).add_to(m)
+
+        st_folium(m, width=700, height=350)
+
+    # ==========================================================================
+    # USE CASE 3 & 4: EMERGENCY ALERT ACTIVATION & NOTIFICATIONS
+    # ==========================================================================
+    elif nav_option == "🚨 Activate Emergency Alert":
+        st.subheader("3. Emergency Alert Activation")
+        st.write("Pressing the SOS button below instantly transmits your real-time coordinates to saved personal contacts and security authorities.")
+
+        # Load active location from session or default
+        user_lat = st.session_state.get('user_lat', 9.056700)
+        user_lon = st.session_state.get('user_lon', 7.496900)
+
+        st.warning(f"Target Broadcast Location: **Lat {user_lat:.6f}, Lon {user_lon:.6f}**")
+
+        if st.button("🔴 TRIGGER SOS DISTRESS ALERT", type="primary"):
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            maps_link = f"https://maps.google.com/?q={user_lat},{user_lon}"
+            
+            # Formulate Notification Messages (Use Case 4)
+            contact_msg = f"EMERGENCY ALERT! Student {st.session_state.current_user} ({user_info['name']}) needs help! Location: {maps_link}"
+            auth_msg = f"SECURITY DISPATCH: Student SOS triggered by {st.session_state.current_user} at coordinates ({user_lat:.6f}, {user_lon:.6f}). Map: {maps_link}"
+
+            # 1. Dispatch Notification to Contact (Family/Friend)
+            friend_success, friend_sid = send_real_sms(user_info['contact'], contact_msg)
+            
+            # 2. Dispatch Notification to Authority (Security/Police)
+            auth_success, auth_sid = send_real_sms(user_info['authority_contact'], auth_msg)
+
+            # Store in Alert History (Use Case 5)
+            alert_entry = {
+                "student_id": st.session_state.current_user,
+                "timestamp": timestamp,
+                "location": f"{user_lat:.6f}, {user_lon:.6f}",
+                "contact_recipient": user_info['contact'],
+                "contact_status": "DELIVERED" if friend_success else "SIMULATED/FAILED",
+                "authority_recipient": user_info['authority_contact'],
+                "authority_status": "DISPATCHED" if auth_success else "DISPATCHED (SIMULATED)"
+            }
+            st.session_state.alert_history.append(alert_entry)
+
+            # UI Display Results
+            st.success("🚨 **EMERGENCY ALERT TRIGGERED SUCCESSFULLY!**")
+            
+            st.markdown(f"📲 **Notification to Contact (Family/Friend):** `{user_info['contact']}`")
+            st.code(contact_msg)
+
+            st.markdown(f"👮 **Notification to Authority (Security/Police):** `{user_info['authority_contact']}`")
+            st.code(auth_msg)
+
+            # Audio Siren Trigger
+            st.markdown("""
+                <audio autoplay>
+                  <source src="https://www.soundjay.com/buttons/beep-01a.mp3" type="audio/mpeg">
+                </audio>
+            """, unsafe_allow_html=True)
+
+    # ==========================================================================
+    # USE CASE 5: VIEWING ALERT HISTORY
+    # ==========================================================================
+    elif nav_option == "📜 View Alert History":
+        st.subheader("5. Viewing Alert History")
+        st.write("Below is the record of past emergency alerts activated by students.")
+
+        if st.session_state.alert_history:
+            df_history = pd.DataFrame(st.session_state.alert_history)
+            st.dataframe(df_history, use_container_width=True)
+        else:
+            st.info("No past emergency alerts recorded in the current session.")
