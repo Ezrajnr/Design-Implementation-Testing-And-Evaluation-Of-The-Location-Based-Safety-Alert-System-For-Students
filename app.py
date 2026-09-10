@@ -9,7 +9,7 @@ from streamlit_js_eval import get_geolocation
 from twilio.rest import Client
 
 # Page Configuration for Mobile View
-st.set_page_config(page_title="Location-Based Safety Alert System", page_icon="🛡️", layout="centered")
+st.set_page_config(page_title="Location-Based Safety Alert System For Student", page_icon="🛡️", layout="centered")
 
 # Custom CSS Banners and Layout Enhancements
 st.markdown("""
@@ -17,18 +17,21 @@ st.markdown("""
     .safe-banner {
         background-color: #d4edda;
         color: #155724;
-        padding: 10px;
+        padding: 12px;
         border-radius: 8px;
         text-align: center;
-        margin-bottom: 10px;
+        margin-bottom: 15px;
+        font-weight: bold;
     }
     .danger-banner {
         background-color: #f8d7da;
         color: #721c24;
-        padding: 10px;
+        padding: 12px;
         border-radius: 8px;
         text-align: center;
-        margin-bottom: 10px;
+        margin-bottom: 15px;
+        border: 2px solid #f5c6cb;
+        font-weight: bold;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -55,7 +58,7 @@ if 'current_user' not in st.session_state:
 if 'alert_history' not in st.session_state:
     st.session_state.alert_history = []
 
-# High-Risk Geofence Polygon Setup
+# High-Risk Geofence Polygon Setup (Danger Zone Coordinates)
 HIGH_RISK_ZONE = [
     (6.5244, 3.3792),
     (6.5260, 3.3792),
@@ -151,10 +154,10 @@ else:
     )
 
     # ==========================================================================
-    # USE CASE 2: LOCATION TRACKING
+    # USE CASE 2: LOCATION TRACKING & DANGER ZONE DETECTION
     # ==========================================================================
     if nav_option == "📍 Location Tracking & Safety Map":
-        st.subheader("2. Real-time Location Tracking")
+        st.subheader("2. Real-time Location Tracking & Danger Zone Detection")
         
         # Capture live browser/mobile GPS
         loc = get_geolocation()
@@ -166,41 +169,60 @@ else:
             st.success(f"GPS Signal Active (Accuracy: ±{accuracy:.1f}m)")
             st.info(f"**Latitude:** {user_lat:.6f} | **Longitude:** {user_lon:.6f}")
         else:
-            st.warning("⚠️ Requesting device GPS... Using default campus coordinates.")
-            user_lat = 9.056700
-            user_lon = 7.496900
+            st.warning("⚠️ Requesting device GPS... You can manually test coordinates below.")
+            
+            # Interactive Coordinate Controls for Testing Danger Zone Detection
+            col_lat, col_lon = st.columns(2)
+            with col_lat:
+                user_lat = st.number_input("Latitude", value=6.5250, format="%.6f")
+            with col_lon:
+                user_lon = st.number_input("Longitude", value=3.3800, format="%.6f")
 
         # Save active position to session
         st.session_state['user_lat'] = user_lat
         st.session_state['user_lon'] = user_lon
 
-        # Spatial Boundary Assessment
+        # Spatial Boundary Assessment (Danger Zone Detection)
         current_point = Point(user_lat, user_lon)
         is_in_danger_zone = risk_polygon.contains(current_point)
 
+        # Danger Zone Warning System
         if is_in_danger_zone:
-            st.markdown('<div class="danger-banner">⚠️ <b>WARNING:</b> You are in a designated High-Risk Zone!</div>', unsafe_allow_html=True)
+            st.error("🚨 DANGER ZONE DETECTED!")
+            st.markdown(
+                '<div class="danger-banner">⚠️ <b>CRITICAL WARNING:</b> You have entered a designated High-Risk Danger Zone! Please proceed with caution or relocate to a safe area immediately.</div>', 
+                unsafe_allow_html=True
+            )
         else:
-            st.markdown('<div class="safe-banner">✅ You are currently in a designated Safe Zone.</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="safe-banner">✅ You are currently in a designated Safe Zone.</div>', 
+                unsafe_allow_html=True
+            )
 
-        # Map Display
-        m = folium.Map(location=[user_lat, user_lon], zoom_start=16)
-        folium.Marker(
-            [user_lat, user_lon],
-            popup=f"User: {st.session_state.current_user}",
-            icon=folium.Icon(color="red" if is_in_danger_zone else "blue", icon="user", prefix="fa")
-        ).add_to(m)
+        # Map Display with Danger Zone Overlay
+        m = folium.Map(location=[user_lat, user_lon], zoom_start=15)
 
+        # Mark Danger Zone Polygon on Map
         folium.Polygon(
             locations=HIGH_RISK_ZONE,
             color="red",
+            weight=3,
             fill=True,
             fill_color="red",
-            fill_opacity=0.3,
-            popup="High-Risk Zone"
+            fill_opacity=0.4,
+            popup=folium.Popup("<b>⚠️ HIGH-RISK DANGER ZONE</b><br>Restricted / Unsafe Area", max_width=200),
+            tooltip="⚠️ High-Risk Danger Zone"
         ).add_to(m)
 
-        st_folium(m, width=700, height=350)
+        # Mark User Location on Map
+        folium.Marker(
+            [user_lat, user_lon],
+            popup=f"<b>Student:</b> {st.session_state.current_user}<br><b>Status:</b> {'IN DANGER ZONE' if is_in_danger_zone else 'SAFE ZONE'}",
+            tooltip="Your Current Location",
+            icon=folium.Icon(color="red" if is_in_danger_zone else "green", icon="user", prefix="fa")
+        ).add_to(m)
+
+        st_folium(m, width=700, height=400)
 
     # ==========================================================================
     # USE CASE 3 & 4: EMERGENCY ALERT ACTIVATION & NOTIFICATIONS
@@ -210,8 +232,8 @@ else:
         st.write("Pressing the SOS button below instantly transmits your real-time coordinates to saved personal contacts and security authorities.")
 
         # Load active location from session or default
-        user_lat = st.session_state.get('user_lat', 9.056700)
-        user_lon = st.session_state.get('user_lon', 7.496900)
+        user_lat = st.session_state.get('user_lat', 6.5250)
+        user_lon = st.session_state.get('user_lon', 3.3800)
 
         st.warning(f"Target Broadcast Location: **Lat {user_lat:.6f}, Lon {user_lon:.6f}**")
 
