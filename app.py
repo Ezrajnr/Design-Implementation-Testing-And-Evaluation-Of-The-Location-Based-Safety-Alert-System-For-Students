@@ -49,7 +49,7 @@ if 'current_user' not in st.session_state:
 if 'alert_history' not in st.session_state:
     st.session_state.alert_history = []
 
-# High-Risk Geofence Polygon Setup (Danger Zone Coordinates)
+# High-Risk Geofence Polygon Setup (Red Danger Zone Coordinates)
 HIGH_RISK_ZONE = [
     (6.5244, 3.3792),
     (6.5260, 3.3792),
@@ -57,6 +57,9 @@ HIGH_RISK_ZONE = [
     (6.5244, 3.3820)
 ]
 risk_polygon = Polygon(HIGH_RISK_ZONE)
+
+# Danger Zone Center Point for Map Display
+DANGER_CENTER = (6.5252, 3.3806)
 
 # Helper Function: Twilio Live SMS Dispatch
 def send_real_sms(to_number, message_body):
@@ -180,7 +183,7 @@ else:
         # Danger Zone Warning Displays Prominently
         st.error("🚨 HIGH-RISK DANGER ZONE WARNING!")
         st.markdown(
-            '<div class="danger-banner">⚠️ <b>ATTENTION REQUIRED:</b> High-Risk Danger Zone actively monitored on map! Exercise extreme caution and stay alert.</div>', 
+            '<div class="danger-banner">⚠️ <b>ATTENTION REQUIRED:</b> Red areas on the map indicate high-risk danger zones! Stay clear of restricted boundaries.</div>', 
             unsafe_allow_html=True
         )
 
@@ -196,24 +199,50 @@ else:
             attr=google_attr
         )
 
-        # Mark High-Risk Danger Zone Polygon on Google Map
+        # ----------------------------------------------------------------------
+        # RED DANGER ZONE MAP OVERLAYS
+        # ----------------------------------------------------------------------
+        # 1. Red Boundary Polygon Highlight
         folium.Polygon(
             locations=HIGH_RISK_ZONE,
-            color="red",
-            weight=3,
+            color="#FF0000",          # Bright Red Boundary Line
+            weight=4,                  # Line Thickness
             fill=True,
-            fill_color="red",
-            fill_opacity=0.45,
-            popup=folium.Popup("<b>⚠️ HIGH-RISK DANGER ZONE</b><br>Restricted Unsafe Area", max_width=200),
-            tooltip="⚠️ High-Risk Danger Zone"
+            fill_color="#FF0000",     # Red Solid Fill Color
+            fill_opacity=0.55,         # Opacity for high visual emphasis
+            popup=folium.Popup("<b>⚠️ HIGH-RISK DANGER ZONE</b><br>Restricted / Unsafe Area", max_width=200),
+            tooltip="🔴 HIGH-RISK DANGER ZONE"
         ).add_to(m)
 
-        # Mark Current Student GPS Location
+        # 2. Outer Red Warning Perimeter Circle
+        folium.Circle(
+            location=DANGER_CENTER,
+            radius=250,                # Radius in meters
+            color="#D32F2F",
+            weight=2,
+            fill=True,
+            fill_color="#FF5252",
+            fill_opacity=0.2,
+            popup="⚠️ Danger Perimeter (250m Radius)",
+            tooltip="⚠️ High-Risk Danger Radius"
+        ).add_to(m)
+
+        # 3. Danger Zone Caution Marker
+        folium.Marker(
+            location=DANGER_CENTER,
+            popup="<b>🚨 DANGER ZONE CENTER</b><br>Crime/Risk Hotspot",
+            tooltip="🚨 Danger Hotspot",
+            icon=folium.Icon(color="red", icon="exclamation-triangle", prefix="fa")
+        ).add_to(m)
+
+        # ----------------------------------------------------------------------
+        # USER GPS POSITION MARKER
+        # ----------------------------------------------------------------------
         folium.Marker(
             [user_lat, user_lon],
             popup=f"<b>Student:</b> {st.session_state.current_user}<br><b>Status:</b> {'INSIDE DANGER ZONE' if is_in_danger_zone else 'OUTSIDE DANGER ZONE'}",
             tooltip="Your GPS Location",
-            icon=folium.Icon(color="red" if is_in_danger_zone else "blue", icon="user", prefix="fa")
+            icon=folium.Icon(color="darkred" if is_in_danger_zone else "blue", icon="user", prefix="fa")
         ).add_to(m)
 
         st_folium(m, width=700, height=400)
